@@ -62,7 +62,7 @@ function matchesFlow(flow: Flow, event: IncomingEvent): boolean {
 async function runActionChain(flow: Flow, event: IncomingEvent) {
   const triggerNode = flow.nodes.find((n) => n.data.kind === "trigger");
   if (!triggerNode) {
-    recordRun({
+    await recordRun({
       flowId: flow.id,
       flowName: flow.name,
       status: "skipped",
@@ -128,7 +128,7 @@ async function runActionChain(flow: Flow, event: IncomingEvent) {
       current = nextNode(flow, current.id);
     }
 
-    recordRun({
+    await recordRun({
       flowId: flow.id,
       flowName: flow.name,
       recipientId,
@@ -136,7 +136,7 @@ async function runActionChain(flow: Flow, event: IncomingEvent) {
       status: "success",
     });
   } catch (error) {
-    recordRun({
+    await recordRun({
       flowId: flow.id,
       flowName: flow.name,
       recipientId,
@@ -154,9 +154,10 @@ export async function handleIncomingEvent(event: IncomingEvent) {
       ? (["new_message", "keyword"] as const)
       : (["comment_keyword"] as const);
 
-  const flows = candidateTriggerTypes.flatMap((t) =>
-    listActiveFlowsByTrigger(t)
+  const flowLists = await Promise.all(
+    candidateTriggerTypes.map((t) => listActiveFlowsByTrigger(t))
   );
+  const flows = flowLists.flat();
 
   const matched = flows.filter((flow) => matchesFlow(flow, event));
 

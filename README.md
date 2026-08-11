@@ -8,8 +8,8 @@ API.
 
 - Next.js (App Router) + TypeScript + Tailwind CSS
 - [React Flow](https://reactflow.dev) para o construtor visual de automações
-- SQLite (`better-sqlite3`) como persistência local dos fluxos e do
-  histórico de execuções
+- PostgreSQL (via [`postgres`](https://github.com/porsager/postgres)) como
+  persistência dos fluxos e do histórico de execuções
 - Rotas de API do Next.js fazendo o papel de backend (CRUD de fluxos,
   webhook do Instagram, envio de mensagens via Graph API)
 
@@ -28,13 +28,18 @@ API.
 
 ## Configuração local
 
+Requer um PostgreSQL rodando localmente (ou aponte `DATABASE_URL` para um
+banco remoto, ex: o mesmo do seu deploy no Railway).
+
 ```bash
 npm install
 cp .env.example .env.local
+# edite .env.local e preencha DATABASE_URL
 npm run dev
 ```
 
-Abra [http://localhost:3000](http://localhost:3000).
+Abra [http://localhost:3000](http://localhost:3000). As tabelas são criadas
+automaticamente na primeira requisição — não precisa rodar migrations.
 
 ## Configurando o App no Meta for Developers
 
@@ -76,12 +81,23 @@ Instagram conectada a uma Página do Facebook, e:
   (sem fila/worker assíncrono ainda).
 - Tags são registradas na cadeia de execução, mas ainda não há uma tela
   de gestão de contatos/segmentação por tag.
-- O banco (`.data/manychat.db`) é local ao processo; para produção,
-  trocar por um banco gerenciado (Postgres, Turso, etc.) antes de fazer
-  deploy multi-instância.
 
-## Deploy
+## Deploy (Railway)
 
-Qualquer host compatível com Next.js funciona (Vercel, Fly.io, etc.).
-Lembre-se de configurar as três variáveis de ambiente do Instagram no
-painel do provedor de deploy — nunca no repositório.
+1. **New Project → Deploy from GitHub repo** → selecione este repositório
+   (branch `main`).
+2. No mesmo projeto, clique em **+ New → Database → Add PostgreSQL**. O
+   Railway injeta a variável `DATABASE_URL` automaticamente no serviço da
+   aplicação — não precisa configurar nada manualmente.
+3. No serviço da aplicação, aba **Variables**, adicione:
+   - `INSTAGRAM_ACCESS_TOKEN`
+   - `INSTAGRAM_APP_SECRET`
+   - `INSTAGRAM_VERIFY_TOKEN`
+4. Aba **Settings → Networking**, clique em **Generate Domain** para obter
+   a URL pública.
+5. Use essa URL (`https://SEU-DOMINIO/api/webhook/instagram`) para
+   cadastrar o webhook no painel da Meta, como descrito acima.
+
+Qualquer outro host compatível com Next.js + PostgreSQL também funciona
+(Fly.io, Render, etc.) — só ajuste `DATABASE_URL` e as variáveis do
+Instagram no painel do provedor escolhido, nunca no repositório.

@@ -9,7 +9,7 @@ const createFlowSchema = z.object({
 });
 
 export async function GET() {
-  return NextResponse.json({ flows: listFlows() });
+  return NextResponse.json({ flows: await listFlows() });
 }
 
 export async function POST(req: NextRequest) {
@@ -22,6 +22,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const flow = createFlow(parsed.data);
+  const flow = await createFlow(parsed.data);
   return NextResponse.json({ flow }, { status: 201 });
 }

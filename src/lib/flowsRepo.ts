@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { db } from "./db";
+import { ensureSchema, sql } from "./db";
 import type { Flow, FlowEdge, FlowNode, FlowRun, TriggerType } from "./types";
 
 interface FlowRow {
@@ -7,11 +7,15 @@ interface FlowRow {
   name: string;
   trigger_type: TriggerType;
   trigger_value: string;
-  nodes: string;
-  edges: string;
-  active: number;
-  created_at: string;
-  updated_at: string;
+  nodes: FlowNode[] | string;
+  edges: FlowEdge[] | string;
+  active: boolean;
+  created_at: Date;
+  updated_at: Date;
+}
+
+function asArray<T>(value: T[] | string): T[] {
+  return typeof value === "string" ? JSON.parse(value) : value;
 }
 
 function rowToFlow(row: FlowRow): Flow {
@@ -20,41 +24,47 @@ function rowToFlow(row: FlowRow): Flow {
     name: row.name,
     triggerType: row.trigger_type,
     triggerValue: row.trigger_value,
-    nodes: JSON.parse(row.nodes) as FlowNode[],
-    edges: JSON.parse(row.edges) as FlowEdge[],
-    active: Boolean(row.active),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    nodes: asArray(row.nodes),
+    edges: asArray(row.edges),
+    active: row.active,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
   };
 }
 
-export function listFlows(): Flow[] {
-  const rows = db
-    .prepare("SELECT * FROM flows ORDER BY updated_at DESC")
-    .all() as FlowRow[];
+export async function listFlows(): Promise<Flow[]> {
+  await ensureSchema();
+  const rows = (await sql`
+    SELECT * FROM flows ORDER BY updated_at DESC
+  `) as unknown as FlowRow[];
   return rows.map(rowToFlow);
 }
 
-export function getFlow(id: string): Flow | null {
-  const row = db.prepare("SELECT * FROM flows WHERE id = ?").get(id) as
-    | FlowRow
-    | undefined;
-  return row ? rowToFlow(row) : null;
+export async function getFlow(id: string): Promise<Flow | null> {
+  await ensureSchema();
+  const rows = (await sql`
+    SELECT * FROM flows WHERE id = ${id}
+  `) as unknown as FlowRow[];
+  return rows[0] ? rowToFlow(rows[0]) : null;
 }
 
-export function listActiveFlowsByTrigger(triggerType: TriggerType): Flow[] {
-  const rows = db
-    .prepare("SELECT * FROM flows WHERE active = 1 AND trigger_type = ?")
-    .all(triggerType) as FlowRow[];
+export async function listActiveFlowsByTrigger(
+  triggerType: TriggerType
+): Promise<Flow[]> {
+  await ensureSchema();
+  const rows = (await sql`
+    SELECT * FROM flows WHERE active = true AND trigger_type = ${triggerType}
+  `) as unknown as FlowRow[];
   return rows.map(rowToFlow);
 }
 
-export function createFlow(input: {
+export async function createFlow(input: {
   name: string;
   triggerType: TriggerType;
   triggerValue?: string;
-}): Flow {
-  const now = new Date().toISOString();
+}): Promise<Flow> {
+  await ensureSchema();
+  const now = new Date();
   const id = nanoid(10);
   const triggerNode: FlowNode = {
     id: "trigger-1",
@@ -73,24 +83,25 @@ export function createFlow(input: {
     },
   };
 
-  db.prepare(
-    `INSERT INTO flows (id, name, trigger_type, trigger_value, nodes, edges, active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`
-  ).run(
-    id,
-    input.name,
-    input.triggerType,
-    input.triggerValue ?? "",
-    JSON.stringify([triggerNode]),
-    JSON.stringify([]),
-    now,
-    now
-  );
+  await sql`
+    INSERT INTO flows (id, name, trigger_type, trigger_value, nodes, edges, active, created_at, updated_at)
+    VALUES (
+      ${id},
+      ${input.name},
+      ${input.triggerType},
+      ${input.triggerValue ?? ""},
+      ${JSON.stringify([triggerNode])}::jsonb,
+      ${JSON.stringify([])}::jsonb,
+      false,
+      ${now},
+      ${now}
+    )
+  `;
 
-  return getFlow(id)!;
+  return (await getFlow(id))!;
 }
 
-export function updateFlow(
+export async function updateFlow(
   id: string,
   input: Partial<{
     name: string;
@@ -100,8 +111,9 @@ export function updateFlow(
     edges: FlowEdge[];
     active: boolean;
   }>
-): Flow | null {
-  const existing = getFlow(id);
+): Promise<Flow | null> {
+  await ensureSchema();
+  const existing = await getFlow(id);
   if (!existing) return null;
 
   const merged = {
@@ -113,55 +125,56 @@ export function updateFlow(
     active: input.active ?? existing.active,
   };
 
-  db.prepare(
-    `UPDATE flows SET name = ?, trigger_type = ?, trigger_value = ?, nodes = ?, edges = ?, active = ?, updated_at = ?
-     WHERE id = ?`
-  ).run(
-    merged.name,
-    merged.triggerType,
-    merged.triggerValue,
-    JSON.stringify(merged.nodes),
-    JSON.stringify(merged.edges),
-    merged.active ? 1 : 0,
-    new Date().toISOString(),
-    id
-  );
+  await sql`
+    UPDATE flows SET
+      name = ${merged.name},
+      trigger_type = ${merged.triggerType},
+      trigger_value = ${merged.triggerValue},
+      nodes = ${JSON.stringify(merged.nodes)}::jsonb,
+      edges = ${JSON.stringify(merged.edges)}::jsonb,
+      active = ${merged.active},
+      updated_at = ${new Date()}
+    WHERE id = ${id}
+  `;
 
   return getFlow(id);
 }
 
-export function deleteFlow(id: string): boolean {
-  const result = db.prepare("DELETE FROM flows WHERE id = ?").run(id);
-  return result.changes > 0;
+export async function deleteFlow(id: string): Promise<boolean> {
+  await ensureSchema();
+  const result = await sql`DELETE FROM flows WHERE id = ${id}`;
+  return result.count > 0;
 }
 
-export function recordRun(input: {
+export async function recordRun(input: {
   flowId: string;
   flowName: string;
   recipientId?: string | null;
   triggerSummary?: string | null;
   status: "success" | "error" | "skipped";
   detail?: string | null;
-}): void {
-  db.prepare(
-    `INSERT INTO runs (id, flow_id, flow_name, recipient_id, trigger_summary, status, detail, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    nanoid(10),
-    input.flowId,
-    input.flowName,
-    input.recipientId ?? null,
-    input.triggerSummary ?? null,
-    input.status,
-    input.detail ?? null,
-    new Date().toISOString()
-  );
+}): Promise<void> {
+  await ensureSchema();
+  await sql`
+    INSERT INTO runs (id, flow_id, flow_name, recipient_id, trigger_summary, status, detail, created_at)
+    VALUES (
+      ${nanoid(10)},
+      ${input.flowId},
+      ${input.flowName},
+      ${input.recipientId ?? null},
+      ${input.triggerSummary ?? null},
+      ${input.status},
+      ${input.detail ?? null},
+      ${new Date()}
+    )
+  `;
 }
 
-export function listRuns(limit = 50): FlowRun[] {
-  const rows = db
-    .prepare("SELECT * FROM runs ORDER BY created_at DESC LIMIT ?")
-    .all(limit) as {
+export async function listRuns(limit = 50): Promise<FlowRun[]> {
+  await ensureSchema();
+  const rows = (await sql`
+    SELECT * FROM runs ORDER BY created_at DESC LIMIT ${limit}
+  `) as unknown as {
     id: string;
     flow_id: string;
     flow_name: string;
@@ -169,7 +182,7 @@ export function listRuns(limit = 50): FlowRun[] {
     trigger_summary: string | null;
     status: "success" | "error" | "skipped";
     detail: string | null;
-    created_at: string;
+    created_at: Date;
   }[];
 
   return rows.map((row) => ({
@@ -180,6 +193,6 @@ export function listRuns(limit = 50): FlowRun[] {
     triggerSummary: row.trigger_summary,
     status: row.status,
     detail: row.detail,
-    createdAt: row.created_at,
+    createdAt: row.created_at.toISOString(),
   }));
 }

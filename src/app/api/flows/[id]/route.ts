@@ -47,7 +47,7 @@ type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_req: NextRequest, { params }: Params) {
   const { id } = await params;
-  const flow = getFlow(id);
+  const flow = await getFlow(id);
   if (!flow) return NextResponse.json({ error: "not found" }, { status: 404 });
   return NextResponse.json({ flow });
 }
@@ -63,14 +63,14 @@ export async function PUT(req: NextRequest, { params }: Params) {
     );
   }
 
-  const flow = updateFlow(id, parsed.data);
+  const flow = await updateFlow(id, parsed.data);
   if (!flow) return NextResponse.json({ error: "not found" }, { status: 404 });
   return NextResponse.json({ flow });
 }
 
 export async function DELETE(_req: NextRequest, { params }: Params) {
   const { id } = await params;
-  const ok = deleteFlow(id);
+  const ok = await deleteFlow(id);
   if (!ok) return NextResponse.json({ error: "not found" }, { status: 404 });
   return NextResponse.json({ ok: true });
 }
