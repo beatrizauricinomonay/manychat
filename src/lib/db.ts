@@ -14,11 +14,30 @@ function createConnection() {
   return postgres(url, { ssl: "prefer" });
 }
 
-export const sql = globalThis.__manychatSql ?? createConnection();
-
-if (process.env.NODE_ENV !== "production") {
-  globalThis.__manychatSql = sql;
+function getConnection() {
+  if (!globalThis.__manychatSql) {
+    globalThis.__manychatSql = createConnection();
+  }
+  return globalThis.__manychatSql;
 }
+
+// Conexão só é criada na primeira query real (não no carregamento do módulo),
+// porque o Next.js importa este arquivo durante o build para analisar as
+// rotas, momento em que DATABASE_URL ainda não está disponível no Railway.
+export const sql: ReturnType<typeof postgres> = new Proxy(
+  (() => {}) as unknown as ReturnType<typeof postgres>,
+  {
+    apply(_target, _thisArg, args) {
+      const conn = getConnection() as unknown as (
+        ...a: unknown[]
+      ) => unknown;
+      return conn(...args);
+    },
+    get(_target, prop, receiver) {
+      return Reflect.get(getConnection(), prop, receiver);
+    },
+  }
+);
 
 let migrated = false;
 export async function ensureSchema() {
